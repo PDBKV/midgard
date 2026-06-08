@@ -549,21 +549,44 @@ class Rinex3NavParser(ChainParser):
             "e1": [0b000000010, 0b000000100, 0b000000110],
         }
 
+        signal_shs_shifts = {
+            "e5b" : 7,
+            "e5a" : 4,
+            "e1"  : 1,
+        }
+
         # Mask definition for DVS status detection
         signal_dvs_masks = {"e5b": 0b001000000, "e5a": 0b000001000, "e1": 0b000000001}
 
         # Loop over Galileo signals and belonging SHS masks for SHS detection
         for signal, shs_masks in signal_shs_masks.items():
-            self.data["shs_" + signal] = np.zeros(num_obs, dtype=bool)
+            self.data["shs_" + signal] = np.zeros(num_obs, dtype=np.uint16)
             for shs_mask in shs_masks:
-                self.data["shs_" + signal][idx] = np.bitwise_and(sv_health[idx].astype(int), shs_mask)
-            self.data["shs_" + signal] = self.data["shs_" + signal].astype(bool)
+                self.data["shs_" + signal][idx] = np.right_shift(
+                        np.bitwise_and(sv_health[idx].astype(int), shs_mask),
+                        signal_shs_shifts[signal]
+                    )
+            self.data["shs_" + signal] = self.data["shs_" + signal]#.astype(bool)
+
 
         # Loop over Galileo signals and belonging DVS masks for DVS detection
         for signal, dvs_mask in signal_dvs_masks.items():
             self.data["dvs_" + signal] = np.zeros(num_obs, dtype=bool)
             self.data["dvs_" + signal][idx] = np.bitwise_and(sv_health[idx].astype(int), dvs_mask)
             self.data["dvs_" + signal] = self.data["dvs_" + signal].astype(bool)
+
+        ignore_list = ["E14", "E18", "E21"]
+        for row, health in enumerate(self.data["sv_health"]):
+            if health != 0.0 and self.data["satellite"][row] not in ignore_list:
+                healthbits = f"{int(health):09b}"
+                print(f"-- signal health {self.data["satellite"][row]} -- {self.data["time"][row]} --")
+                print(f"health float: {health} in binary {int(health):09b}")
+                print(f"E1 DVS : {healthbits[-1]}")
+                print(f"E1 SHS : {healthbits[-3:-1]} - Parsed as {self.data["shs_e1"][row]}")
+                print(f"E5A DVS : {healthbits[-4]}")
+                print(f"E5A SHS : {healthbits[-6:-4]} - Parsed as {self.data["shs_e5a"][row]}")
+                print(f"E5B DVS : {healthbits[-7]}")
+                print(f"E5B SHS : {healthbits[-9:-7]} - Parsed as {self.data["shs_e5b"][row]}")
 
     def _determine_message_type(self) -> None:
         """Determine navigation message type and save it in 'data' dictionary under 'nav_type' key
@@ -666,9 +689,9 @@ class Rinex3NavParser(ChainParser):
         Following relationship are given between GNSS time scale (either BeiDou, Galileo, IRNSS or QZSS)
         :math:`t_{GNSS}` and GPS time scale :math:`t_{GPS}` (see Section 2.1.4 in :cite:`teunissen2017`):
         .. math::
-              t_{GPS}  = t_{GNSS} + \Delta t
+              t_{GPS}  = t_{GNSS} + \\Delta t
 
-        The time offset :math:`\Delta t` is 0 s for Galileo, IRNSS and QZSS and for BeiDou 14 s. All these time scales
+        The time offset :math:`\\Delta t` is 0 s for Galileo, IRNSS and QZSS and for BeiDou 14 s. All these time scales
         are related to the International Atomic Time (TAI) by a certain time offset. In addition the GNSS week number
         is different depending on the GNSS. Galileo, IRNSS and QZSS are referring to the same GPS week, whereas BeiDou
         week starts at GPS week 1356.
